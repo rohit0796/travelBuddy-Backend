@@ -5,7 +5,16 @@ const Schema = require('./models/UserSchema')
 const Chat = require('./models/chatSchema')
 const Message = require('./models/messageSchema')
 const { getIo } = require('./socket')
-
+const { firebase } = require('./Firebase/firebase')
+const sendNotification = (fcmtoken, title, body) => {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    })
+}
 app.post('/accessChat', async (req, res) => {
     const { userid, searchid } = req.body;
     if (!userid) {
@@ -127,15 +136,23 @@ app.post('/send-messages', async (req, res) => {
         message = await message.populate("Chat")
         message = await Schema.populate(message, {
             path: "Chat.users",
-            select: "username picUrl email",
+            select: "username picUrl email fcmToken",
         });
-        console.log(message)
+        // console.log(message)
+        var receiver = [];
+        message.Chat.users.forEach(user => {
+            if (user._id != userId)
+                receiver.push(user.fcmToken)
+        });
         await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message }, { new: true });
         res.json(message);
+        receiver.forEach((rec) => {
+            sendNotification(rec, message.sender.username, content)
+        })
 
     } catch (error) {
         res.status(400);
-        throw new Error(error.message);
+        console.log(error.message);
     }
 });
 app.post('/create-groupChat', async (req, res) => {

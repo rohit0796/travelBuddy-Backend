@@ -4,7 +4,7 @@ const urlRouter = require('./routes')
 const chatRouter = require('./chatRoutes')
 const tripRouter = require('./tripRouter')
 const bodyParser = require('body-parser');
-
+const { firebase } = require('./Firebase/firebase')
 const cors = require('cors')
 const mongoose = require('mongoose');
 const { init, getIo } = require('./socket');
@@ -51,7 +51,7 @@ io.on('connection', (socket) => {
                 if (user._id != userMessage.sender._id) {
                     io.to(user._id).emit("message received", userMessage);
                 }
-                io.to(user._id).emit('reload',userMessage)
+                io.to(user._id).emit('reload', userMessage)
             });
         }
     });
@@ -72,4 +72,16 @@ io.on('connection', (socket) => {
     });
 })
 
-module.exports = { io }
+const sendNotification = (fcmtoken, title, body) => {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    })
+}
+// setTimeout(() => {
+//     sendNotification()
+// }, 2000)
+module.exports = { io, sendNotification }

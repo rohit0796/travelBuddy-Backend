@@ -33,32 +33,16 @@ const tripSchema = mongoose.Schema({
     ],
     expenses: [
         {
-            description: {
-                type: String
-            },
-            amount: {
-                type: Number
-            },
-            members: [],
-            creator: {
-                type: mongoose.Schema.Types.ObjectId,
-                ref: 'User'
-            },
-            createdAt: {
-                type: Date,
-                default: Date.now
-            }
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "expenses"
         }
     ],
-    polls: [{
-        question: {
-            type: String
-        },
-        multipleChoice: {
-            type: Boolean
-        },
-        options: []
-    }],
+    polls: [
+        {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'poll'
+        }
+    ],
 })
 
 const Trip = mongoose.model('Trip', tripSchema);

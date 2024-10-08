@@ -3,7 +3,22 @@ const app = express.Router();
 const User = require('./models/UserSchema');
 const Trip = require('./models/TripSchema');
 const Notifications = require('./models/Notifications');
+const Match = require('./models/MatchListSchema');
+
 const { getIo } = require('./socket');
+const Expense = require('./models/exepnseSchema');
+const polls = require('./models/pollSchema');
+const { firebase } = require('./Firebase/firebase');
+const user = require('./models/UserSchema');
+const sendNotification = (fcmtoken, title, body) => {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    })
+}
 const createAndEmitNotification = async (userId, title, message, source) => {
     const io = getIo()
     const notification = await Notifications({ userId, title, message, source });
@@ -35,6 +50,8 @@ app.post('/create-trip', async (req, res) => {
         users.forEach(user => {
             if (user._id !== currentUser._id) {
                 createAndEmitNotification(user._id, 'New Trip', `${trip.destination} has been created`, 'trip');
+                sendNotification(user?.fcmToken, 'New Trip', `${trip.destination} has been created`)
+
             }
         });
         res.json({ status: 'ok', trip: populatedTrip });
@@ -63,8 +80,15 @@ app.get('/:tripId', async (req, res) => {
 
     try {
         const trip = await Trip.findById(tripId)
-            .populate('travellers', 'picUrl username') // Populate travellers
-            .populate('expenses.creator', 'picUrl username'); // Populate creator if needed
+            .populate('travellers', 'picUrl username')
+            .populate('polls')
+            .populate({
+                path: 'expenses',
+                populate: [
+                    { path: 'creator', select: 'picUrl username' },
+                    { path: 'members.member', select: 'picUrl username' }
+                ]
+            });
 
         if (!trip) {
             return res.status(404).json({ status: 'error', message: 'Trip not found' });
@@ -80,24 +104,33 @@ app.get('/:tripId', async (req, res) => {
 app.post('/add-expense', async (req, res) => {
     try {
         const { amount, description, creator, tripId, members } = req.body;
+        var newMembers = members.map((mem) => {
+            if (mem.member == creator)
+                return {
+                    ...mem,
+                    paid: true
+                }
+            else return mem
+        })
         const newExpense = {
             amount,
+            trip: tripId,
             description,
             creator,
-            members
+            members: newMembers
         }
-        const trip = await Trip.findByIdAndUpdate(tripId, { $push: { expenses: newExpense } }, { new: true }).populate('travellers', 'picUrl username')
-            .populate({
-                path: 'expenses.creator',
-                select: 'picUrl username'
-            });
-        const users = trip.travellers;
+        const expense = new Expense(newExpense)
+        await expense.save()
+        const trip = await Trip.findById(tripId)
+        trip.expenses.push(expense._id)
+        await trip.save()
+        const users = members;
         users.forEach(user => {
-            if (user._id !== creator._id) {
-                createAndEmitNotification(user._id, 'New Expense', `A new expense has been added to ${trip.destination}`, 'expense');
+            if (user.member != creator) {
+                createAndEmitNotification(user.member, 'New Expense', `A new expense - ${description} has been added to ${trip.destination}`, 'expense');
             }
         });
-        res.json({ status: 'ok', data: trip })
+        res.json({ status: 'ok', data: expense })
     } catch (error) {
         res.json({ status: 'error', data: error })
         console.log(error)
@@ -152,60 +185,76 @@ app.post('/:tripId/itinerary', async (req, res) => {
 app.post('/:tripId/add-poll', async (req, res) => {
     const { tripId } = req.params
     try {
-        const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
+        const poll = new polls(req.body)
+        await poll.save()
+        const trip = await Trip.findById(tripId)
+        if (!trip) {
+            return res.status(404).send('Trip not found');
+        }
+        trip.polls.push(poll._id)
+        await trip.save()
+
+        const users = trip.travellers;
+        users.forEach(user => {
+            createAndEmitNotification(user.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll');
+        });
+
+        res.json({ status: 'ok', data: poll })
+    } catch (error) {
+        res.json({ status: 'error', data: error })
+    }
+})
+
+app.post('/delete-expense', async (req, res) => {
+    try {
+        const { id, tripid } = req.body;
+        const trip = await Trip.findById(tripid).populate('travellers', 'picUrl username').populate('expenses')
             .populate({
                 path: 'expenses.creator',
                 select: 'picUrl username'
             });
         if (!trip) {
-            return res.status(404).send('Trip not found');
+            res.json({ msg: 'trip not found!' })
         }
-        trip.polls.push(req.body)
+        trip.expenses = trip.expenses.filter(ex => (ex._id != id))
+        const expense = await Expense.findByIdAndDelete(id)
         await trip.save()
-
-        const users = trip.travellers;
-        users.forEach(user => {
-            createAndEmitNotification(user._id.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll');
-        });
-
-        res.json({ status: 'ok', data: trip.polls })
-    } catch (error) {
-        console.log(error)
+        res.json({ status: 'ok' })
     }
-})
-
-app.post('/delete-expense', async (req, res) => {
-    const { id, tripid } = req.body;
-    const trip = await Trip.findById(tripid).populate('travellers', 'picUrl username')
-        .populate({
-            path: 'expenses.creator',
-            select: 'picUrl username'
-        });
-    if (!trip) {
-        res.json({ msg: 'trip not found!' })
+    catch (error) {
+        res.json({ status: 'error', error })
     }
-    trip.expenses = trip.expenses.filter(ex => (ex._id != id))
-    await trip.save()
-    res.json({ trip })
 })
 // Add this route in your backend server file
 
 app.put('/update-polls', async (req, res) => {
     try {
-        const { tripId, polls } = req.body;
-
-        // Find the trip by ID and update the polls
-        const updatedTrip = await Trip.findByIdAndUpdate(
-            tripId,
-            { polls: polls },
-            { new: true }
-        ).populate('travellers', 'picUrl username')
-            .populate({
-                path: 'expenses.creator',
-                select: 'picUrl username'
-            });
-
-        res.json({ status: 'ok', data: updatedTrip });
+        const { pollId, user, optionIndex } = req.body;
+        const updatedPoll = await polls.findById(pollId)
+        const updatedOptions = updatedPoll.options.map((option, index) => {
+            if (index === optionIndex) {
+                if (option.chosenBy.some((us) => us._id === user._id)) {
+                    return {
+                        ...option,
+                        chosenBy: option.chosenBy.filter((us) => us._id !== user._id),
+                    };
+                } else {
+                    return {
+                        ...option,
+                        chosenBy: [...option.chosenBy, user],
+                    };
+                }
+            } else {
+                if (updatedPoll.multipleChoice) return { ...option };
+                return {
+                    ...option,
+                    chosenBy: option.chosenBy.filter((user) => user._id !== user._id),
+                };
+            }
+        });
+        updatedPoll.options = updatedOptions
+        updatedPoll.save()
+        res.json({ status: 'ok', data: updatedPoll });
     } catch (error) {
         res.json({ status: 'error', data: error });
         console.log(error);
@@ -216,7 +265,7 @@ app.delete('/delete-poll', async (req, res) => {
     const { tripId, pollId } = req.body;
 
     try {
-        const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
+        const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username').populate('polls').populate('expenses')
             .populate({
                 path: 'expenses.creator',
                 select: 'picUrl username'
@@ -224,7 +273,7 @@ app.delete('/delete-poll', async (req, res) => {
         if (!trip) {
             return res.status(404).json({ status: 'error', message: 'Trip not found' });
         }
-
+        const poll = await polls.findByIdAndDelete(pollId)
         trip.polls = trip.polls.filter(poll => poll._id.toString() !== pollId);
         await trip.save();
 
@@ -239,11 +288,19 @@ app.put('/update-trip', async (req, res) => {
     const { tripId, destination, startDate, endDate, budget, travellers, admins, itinerary } = req.body;
     const newTravellers = travellers.map(user => user._id);
     try {
-        const trip = await Trip.findById(tripId);
+        const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
+            .populate('polls')
+            .populate({
+                path: 'expenses',
+                populate: [
+                    { path: 'creator', select: 'picUrl username' },
+                    { path: 'members.member', select: 'picUrl username' }
+                ]
+            });
         if (!trip) {
             return res.status(404).send('Trip not found');
         }
-        const oldTravelers = trip.travellers.map(traveller => traveller.toString()); // Convert ObjectId to string for comparison
+        const oldTravelers = trip.travellers.map(traveller => traveller._id.toString()); // Convert ObjectId to string for comparison
 
         for (const oldTravellerId of oldTravelers) {
             if (!newTravellers.includes(oldTravellerId)) {
@@ -260,10 +317,11 @@ app.put('/update-trip', async (req, res) => {
         trip.startDate = startDate || trip.startDate;
         trip.endDate = endDate || trip.endDate;
         trip.budget = budget || trip.budget;
-        trip.travellers = travellers || trip.travellers;
+        trip.travellers = travellers
         trip.admins = admins || trip.admins;
         trip.itinerary = itinerary?.length === 0 ? trip.itinerary : itinerary;
-
+        // console.log(travellers)
+        console.log(trip)
         const updatedTrip = await trip.save();
 
         for (const traveller of travellers) {
@@ -279,6 +337,138 @@ app.put('/update-trip', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ status: 'error', msg: error.message });
+    }
+});
+app.delete('/delete-MatchData', async (req, res) => {
+    try {
+        const { userId } = req.body;
+        const match = await Match.findOneAndDelete({ userId })
+        const user = await User.findById(userId)
+        user.rightSwipes = []
+        user.save();
+        res.json({ msg: 'deleted match' })
+
+    } catch (error) {
+        res.json({ msg: 'error deleting', error })
+    }
+})
+
+app.get('/:tripId/balance/:userId', async (req, res) => {
+    try {
+        const { tripId, userId } = req.params;
+        const expenses = await Expense.find({ trip: tripId }).populate('members.member creator');
+        const userExpenses = expenses.map(expense => ({
+            description: expense.description,
+            amount: expense.amount,
+            creator: expense.creator._id.toString(),
+            members: expense.members.map(member => ({
+                ...member._doc,
+                member: member.member._id.toString(),
+                isCurrentUser: member.member._id.toString() === userId
+            }))
+        }));
+
+        let totalToReceive = 0;
+        let totalToPay = 0;
+        const balances = {};
+
+        userExpenses.forEach(expense => {
+            if (expense.creator === userId) {
+                // If current user is the creator, they paid the total amount
+                expense.members.forEach(member => {
+                    if (member.member != userId && !member.paid) {
+                        if (balances[member.member] < 0) {
+                            totalToPay += balances[member.member]
+                        }
+                        balances[member.member] = (balances[member.member] || 0) + member.expense;
+                        totalToReceive += balances[member.member];
+                    }
+                });
+            } else {
+                // If current user is not the creator, calculate their share
+                expense.members.forEach(member => {
+                    if (member.isCurrentUser && !member.paid) {
+                        if (balances[expense.creator] > 0) {
+                            totalToPay -= balances[expense.creator];
+                            totalToReceive -= balances[expense.creator];
+                        }
+                        balances[expense.creator] = (balances[expense.creator] || 0) - member.expense;
+                        totalToPay += member.expense;
+                    }
+                });
+            }
+        });
+
+        const balanceDetails = await Promise.all(
+            Object.keys(balances).map(async memberId => {
+                const user = await User.findById(memberId);
+                return {
+                    memberId,
+                    username: user.username,
+                    balance: balances[memberId].toFixed(2)
+                };
+            })
+        );
+
+        res.json({ balanceDetails, totalToReceive, totalToPay });
+    } catch (error) {
+        res.status(500).json({ error: 'An error occurred while calculating balances.' });
+    }
+});
+
+
+app.post('/clear-dues', async (req, res) => {
+    const { expenseIds, userId, selectedMemberId, BalanceAmount } = req.body
+    try {
+        const expenses = await Expense.find({
+            _id: { $in: expenseIds },
+            $or: [
+                { creator: selectedMemberId, 'members.member': userId },
+                { creator: userId, 'members.member': selectedMemberId }
+            ]
+        });
+
+        const updates = expenses.map(expense => {
+            let amount = 0;
+            expense.members.forEach(member => {
+                if ((expense.creator.equals(userId) && member.member.equals(selectedMemberId)) ||
+                    (expense.creator.equals(selectedMemberId) && member.member.equals(userId))) {
+                    member.paid = true;
+                    amount = BalanceAmount;
+                }
+            });
+            expense.activities.push({
+                payer: userId,
+                payee: selectedMemberId,
+                amount: amount
+            });
+            return expense.save();
+        });
+
+        await Promise.all(updates);
+        const user = await User.findById(userId)
+        const user2 = await User.findById(selectedMemberId)
+        res.json({ status: 'ok', message: 'Expenses marked as paid successfully' });
+        createAndEmitNotification(selectedMemberId, 'Payment Done', `${user.username} paid you ₹${BalanceAmount}`, 'expense')
+        sendNotification(user2?.fcmToken, 'New Payment', `${user.username} paid you ₹${BalanceAmount}`)
+
+    } catch (error) {
+        console.error('Error marking expenses as paid:', error);
+        res.status(500).json({ message: 'Server error' });
+    }
+});
+
+app.get('/expense/:expenseId', async (req, res) => {
+    try {
+        const expense = await Expense.findById(req.params.expenseId)
+            .populate('creator', 'username picUrl')
+            .populate('members.member', 'username picUrl')
+            .populate('activities.payer', 'username')
+            .populate('activities.payee', 'username');
+        res.status(200).json(expense);
+    } catch (error) {
+        console.error('Error fetching expense:', error);
+        res.status(500).json({ message: 'Server error' });
     }
 });
 

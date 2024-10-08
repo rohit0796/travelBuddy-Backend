@@ -2,17 +2,89 @@ const express = require('express')
 const User = require('./models/UserSchema');
 const app = express.Router();
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const moment = require('moment')
+require('dotenv').config()
 const Match = require('./models/MatchListSchema');
 const bcrypt = require('bcryptjs');
 const Notification = require('./models/Notifications');
 const { getIo } = require('./socket');
+const { firebase } = require('./Firebase/firebase');
+const sendNotification = (fcmtoken, title, body) => {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    })
+}
+
+const generateOTP = () => {
+    return crypto.randomInt(100000, 999999).toString();
+};
+
+// Function to send OTP
+const sendOTP = async (email, otp) => {
+    // Configure Nodemailer for sending emails
+    let transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: 'service.travel.buddy@gmail.com',
+            pass: 'koph hwzg wutn mdtq'
+        }
+    });
+
+    // Email message
+    let mailOptions = {
+        from: 'service.travel.buddy@gmail.com',
+        to: email,
+        subject: 'TravelBuddy - Your OTP Code',
+        html: `
+        <p>Dear User,</p>
+        <p>Welcome to <strong>TravelBuddy</strong>! We're excited to have you onboard.</p>
+        <p>To complete your registration, please use the following One-Time Password (OTP) to verify your email:</p>
+        <p><strong style="font-size: 20px;">${otp}</strong></p>
+        <p>This OTP is valid for 10 minutes.</p>
+        <p>If you didn't request this, feel free to ignore this email.</p>
+        <p>Thank you,<br />The TravelBuddy Team</p>
+    `
+    };
+
+    await transporter.sendMail(mailOptions);
+};
+
+
+app.use(express.json()); // Ensure this middleware is used
+const cloudinary = require('cloudinary').v2; // Ensure you have cloudinary installed
 const createAndEmitNotification = async (userId, title, message, source, extra = null) => {
     const io = getIo()
     const notification = await Notification({ userId, title, message, source });
     await notification.save();
     io.to(userId).emit('notification', { notification, extra });
 };
+
+app.post('/otpgeneration', async (req, res) => {
+    const { email, forget } = req.body;
+    var user;
+    if (forget) {
+        user = await User.findOne({ email: email })
+    }
+    if (forget && !user) return res.json({ message: 'Email not Registered !!' });
+    const otp = generateOTP();
+    const token = jwt.sign(
+        { otp, exp: Math.floor(Date.now() / 1000) + (10 * 60) }, // expires in 10 mins
+        'your_jwt_secret'
+    );
+
+    // Send OTP to the user
+    await sendOTP(email, otp);
+
+    res.status(201).json({ token, message: 'OTP sent to your email!' });
+
+})
+
 app.post('/signup', async (req, res) => {
     const { username, email, password, bio, location, profilePic, gender, socialMedia } = req.body;
     try {
@@ -21,6 +93,7 @@ app.post('/signup', async (req, res) => {
             // const num = Math.ceil(Math.random() * 10);
             const hashedPassword = await bcrypt.hash(password, 10);
             const picUrl = profilePic ? profilePic : `https://avatar.iran.liara.run/public/${gender == 'male' ? 'boy' : 'girl'}`
+
             const user = new User({
                 username,
                 email,
@@ -41,7 +114,27 @@ app.post('/signup', async (req, res) => {
         res.json({ status: 'error', data: err });
     }
 });
+app.post('/verifyOtp', async (req, res) => {
+    const { token, otp } = req.body;
 
+    try {
+        // Decode the token
+        const decoded = jwt.verify(token, 'your_jwt_secret');
+
+        // Check if OTP matches
+        if (decoded.otp !== otp) {
+            return res.status(400).json({ message: 'Invalid OTP!' });
+        }
+
+        // OTP is valid
+        return res.json({ status: 200, message: 'OTP verified successfully!' });
+    } catch (err) {
+        if (err.name === 'TokenExpiredError') {
+            return res.status(400).json({ message: 'OTP expired!' });
+        }
+        return res.status(400).json({ message: 'Invalid OTP!' });
+    }
+})
 app.post('/login', async (req, res) => {
     var { email, password } = req.body;
     email = email.trim()
@@ -87,7 +180,33 @@ app.post('/login', async (req, res) => {
         res.json({ status: 'error', data: err });
     }
 });
+app.post('/change-password', async (req, res) => {
+    const { email, Oldpassword, newPassword } = req.body;
+    const user = await User.findOne({ email: email })
+    if (!user)
+        return res.json({ status: 'error', error: 'Email does not exist' });
 
+    const isPasswordValid = await bcrypt.compare(Oldpassword, user.password);
+    if (!isPasswordValid) {
+        return res.json({ message: "Old Password is Invalid !!" })
+    }
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+    res.json({ status: 'ok', message: 'Password Changed!' })
+
+})
+app.post('/forget-password', async (req, res) => {
+    const { email, newPassword } = req.body;
+    const user = await User.findOne({ email: email })
+    if (!user)
+        return res.json({ status: 'error', error: 'Email does not exist' });
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+    res.json({ status: 'ok', message: 'Password Changed!' })
+
+})
 app.get('/submit', async (req, res) => {
     const token = req.headers['x-access-token']
     try {
@@ -115,6 +234,7 @@ app.post('/rightswipe/:userid', async (req, res) => {
     if (user.rightSwipes.find((id) => id == currentUserId)) {
         const user2 = await User.findByIdAndUpdate(currentUserId, { $push: { rightSwipes: userid } })
         createAndEmitNotification(userid, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`, 'match', { username: user.username, picUrl: user.picUrl })
+        sendNotification(user.fcmToken, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`)
         res.json({ status: 'ok', msg: 'match found', data: user })
     }
     else {
@@ -183,7 +303,6 @@ app.get('/notification/:userId', async (req, res) => {
     }
 });
 
-// Mark all notifications as read for a specific user
 app.put('/mark-read/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
@@ -218,9 +337,8 @@ app.post('/getMatch', async (req, res) => {
     }
 })
 app.post('/update-profile', async (req, res) => {
-    const { username, email, bio, gender, location, socialMedia, picUrl, id } = req.body
+    const { username, email, bio, gender, location, socialMedia, picUrl, id, fcmToken } = req.body
     try {
-        console.log(req.body)
         const user = await User.findOne({ _id: id }, { password: 0 }).populate({
             path: 'trips',
             populate: {
@@ -238,8 +356,8 @@ app.post('/update-profile', async (req, res) => {
             user.location = location
             user.socialMedia = socialMedia
             user.picUrl = picUrl
+            user.fcmToken = fcmToken
             await user.save()
-            console.log(user)
             res.status(200).json({ user: user })
         }
     } catch (error) {
@@ -247,4 +365,34 @@ app.post('/update-profile', async (req, res) => {
         res.status(500).json({ error: error })
     }
 })
+
+cloudinary.config({
+    cloud_name: process.env.CLOUD_NAME,
+    api_key: process.env.API_KEY,
+    api_secret: process.env.API_SECRET,
+    secure: true
+});
+
+app.post('/delete-image', async (req, res) => {
+    const { public_id } = req.body;
+    try {
+        const result = await cloudinary.uploader.destroy(public_id);
+        console.log('Delete result:', result);
+        if (result.result === 'ok') {
+            res.status(200).json({ message: 'Image deleted successfully' });
+        } else {
+            res.status(400).json({ message: 'Failed to delete image' });
+        }
+    } catch (error) {
+        console.error('Error deleting image:', error);
+        res.status(500).json({ message: error.message });
+    }
+});
+
+app.get('/getdata/:id', async (req, res) => {
+    const { id } = req.params;
+    const matchData = await Match.findOne({ userId: id })
+    res.json(matchData)
+})
+
 module.exports = app;  

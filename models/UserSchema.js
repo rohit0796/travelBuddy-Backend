@@ -36,8 +36,11 @@ const userSchema = mongoose.Schema({
     socialMedia: {},
     location: {
         type: String
-    }
-})
+    },
+    fcmToken: {
+        type: String
+    },
+}) 
 
 const user = mongoose.model('User', userSchema);
 module.exports = user;
