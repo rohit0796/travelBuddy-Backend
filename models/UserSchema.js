@@ -12,6 +12,9 @@ const userSchema = mongoose.Schema({
     picUrl: {
         type: String,
     },
+    phoneNumber: {
+        type: Number,
+    },
     password: {
         type: String,
 
@@ -40,7 +43,7 @@ const userSchema = mongoose.Schema({
     fcmToken: {
         type: String
     },
-}) 
+})
 
 const user = mongoose.model('User', userSchema);
 module.exports = user;

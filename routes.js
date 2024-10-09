@@ -58,9 +58,10 @@ const sendOTP = async (email, otp) => {
 
 app.use(express.json()); // Ensure this middleware is used
 const cloudinary = require('cloudinary').v2; // Ensure you have cloudinary installed
+
 const createAndEmitNotification = async (userId, title, message, source, extra = null) => {
     const io = getIo()
-    const notification = await Notification({ userId, title, message, source });
+    const notification = await Notification({ userId, title, message, source, extra });
     await notification.save();
     io.to(userId).emit('notification', { notification, extra });
 };
@@ -86,7 +87,7 @@ app.post('/otpgeneration', async (req, res) => {
 })
 
 app.post('/signup', async (req, res) => {
-    const { username, email, password, bio, location, profilePic, gender, socialMedia } = req.body;
+    const { username, email, password, bio, phone, location, profilePic, gender, socialMedia } = req.body;
     try {
         const avail = await User.findOne({ email: email });
         if (!avail) {
@@ -101,6 +102,7 @@ app.post('/signup', async (req, res) => {
                 gender,
                 location,
                 bio,
+                phoneNumber: phone,
                 socialMedia,
                 picUrl
             });
@@ -169,6 +171,7 @@ app.post('/login', async (req, res) => {
                 gender: user.gender,
                 socialMedia: user.socialMedia,
                 bio: user.bio,
+                phone: user.phoneNumber,
                 rightSwipes: user.rightSwipes
             };
             return res.json({ status: 'ok', token: token, user: userData, message: 'Welcome Back!' });
@@ -233,7 +236,7 @@ app.post('/rightswipe/:userid', async (req, res) => {
     const user = await User.findOne({ _id: userid })
     if (user.rightSwipes.find((id) => id == currentUserId)) {
         const user2 = await User.findByIdAndUpdate(currentUserId, { $push: { rightSwipes: userid } })
-        createAndEmitNotification(userid, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`, 'match', { username: user.username, picUrl: user.picUrl })
+        createAndEmitNotification(userid, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`, 'match', { username: user2.username, picUrl: user2.picUrl, id: currentUserId })
         sendNotification(user.fcmToken, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`)
         res.json({ status: 'ok', msg: 'match found', data: user })
     }
@@ -337,7 +340,7 @@ app.post('/getMatch', async (req, res) => {
     }
 })
 app.post('/update-profile', async (req, res) => {
-    const { username, email, bio, gender, location, socialMedia, picUrl, id, fcmToken } = req.body
+    const { username, email, bio, gender, location, socialMedia, picUrl, id, fcmToken, phone } = req.body
     try {
         const user = await User.findOne({ _id: id }, { password: 0 }).populate({
             path: 'trips',
@@ -350,6 +353,7 @@ app.post('/update-profile', async (req, res) => {
             res.status(404).json({ msg: 'No User Found' })
         else {
             user.username = username
+            user.phoneNumber = phone
             user.email = email
             user.bio = bio
             user.gender = gender
