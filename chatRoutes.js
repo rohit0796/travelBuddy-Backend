@@ -6,6 +6,7 @@ const Chat = require('./models/chatSchema')
 const Message = require('./models/messageSchema')
 const { getIo } = require('./socket')
 const { firebase } = require('./Firebase/firebase')
+const user = require('./models/UserSchema')
 const sendNotification = (fcmtoken, title, body) => {
     firebase.messaging().send({
         token: fcmtoken,
@@ -40,23 +41,17 @@ app.post('/accessChat', async (req, res) => {
     if (isChat.length > 0) {
         res.send(isChat[0]);
     } else {
+        const user1 = await user.findOne({ _id: searchid })
+        const user2 = await user.findOne({ _id: userid })
         var chatData = {
             chatName: "sender",
             isGroupChat: false,
-            users: [searchid, userid],
+            users: [user1, user2],
+            _id: searchid
         };
+        res.status(200).json(chatData);
 
-        try {
-            const createdChat = await Chat.create(chatData);
-            const FullChat = await Chat.findOne({ _id: createdChat._id }).populate(
-                "users",
-                "-password"
-            );
-            res.status(200).json(FullChat);
-        } catch (error) {
-            res.status(400);
-            throw new Error(error.message);
-        }
+
     }
 })
 
@@ -116,17 +111,33 @@ app.get('/get-messages/:id', async (req, res) => {
         throw new Error(error.message);
     }
 });
+
+
 app.post('/send-messages', async (req, res) => {
     const { content, chatId, userId } = req.body;
     if (!content || !chatId) {
         console.log("Invalid data passed into request");
         return res.sendStatus(400);
     }
-
+    const chat = await Chat.findById(chatId)
+    var createdChat;
+    if (!chat) {
+        try {
+            var chatData = {
+                chatName: "sender",
+                isGroupChat: false,
+                users: [userId, chatId],
+            };
+            createdChat = await Chat.create(chatData);
+        } catch (error) {
+            res.status(400);
+            throw new Error(error.message);
+        }
+    }
     var newMessage = {
         sender: userId,
         content: content,
-        Chat: chatId,
+        Chat: createdChat ? createdChat._id : chatId,
     };
     try {
 
@@ -144,7 +155,7 @@ app.post('/send-messages', async (req, res) => {
             if (user._id != userId)
                 receiver.push(user.fcmToken)
         });
-        await Chat.findByIdAndUpdate(req.body.chatId, { latestMessage: message }, { new: true });
+        await Chat.findByIdAndUpdate(createdChat ? createdChat._id : chatId, { latestMessage: message }, { new: true });
         res.json(message);
         receiver.forEach((rec) => {
             sendNotification(rec, message.sender.username, content)

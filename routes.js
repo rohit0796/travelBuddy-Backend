@@ -82,7 +82,7 @@ app.post('/otpgeneration', async (req, res) => {
     // Send OTP to the user
     await sendOTP(email, otp);
 
-    res.status(201).json({ token, message: 'OTP sent to your email!' });
+    res.status(201).json({ status: 'ok', token, message: 'OTP sent to your email!' });
 
 })
 
@@ -171,7 +171,7 @@ app.post('/login', async (req, res) => {
                 gender: user.gender,
                 socialMedia: user.socialMedia,
                 bio: user.bio,
-                phone: user.phoneNumber,
+                phoneNumber: user.phoneNumber,
                 rightSwipes: user.rightSwipes
             };
             return res.json({ status: 'ok', token: token, user: userData, message: 'Welcome Back!' });
@@ -340,7 +340,7 @@ app.post('/getMatch', async (req, res) => {
     }
 })
 app.post('/update-profile', async (req, res) => {
-    const { username, email, bio, gender, location, socialMedia, picUrl, id, fcmToken, phone } = req.body
+    const { username, email, bio, gender, location, socialMedia, picUrl, id, fcmToken, phoneNumber } = req.body
     try {
         const user = await User.findOne({ _id: id }, { password: 0 }).populate({
             path: 'trips',
@@ -353,7 +353,7 @@ app.post('/update-profile', async (req, res) => {
             res.status(404).json({ msg: 'No User Found' })
         else {
             user.username = username
-            user.phoneNumber = phone
+            user.phoneNumber = phoneNumber
             user.email = email
             user.bio = bio
             user.gender = gender
@@ -362,7 +362,7 @@ app.post('/update-profile', async (req, res) => {
             user.picUrl = picUrl
             user.fcmToken = fcmToken
             await user.save()
-            res.status(200).json({ user: user })
+            res.status(200).json({ user })
         }
     } catch (error) {
         console.log(error)
@@ -398,5 +398,20 @@ app.get('/getdata/:id', async (req, res) => {
     const matchData = await Match.findOne({ userId: id })
     res.json(matchData)
 })
+
+app.post('/checkContacts', async (req, res) => {
+    const { phoneNumbers } = req.body;
+
+    try {
+        const registeredUsers = await User.find({
+            phoneNumber: { $in: phoneNumbers }
+        });
+
+        res.status(200).json({ registeredUsers });
+    } catch (error) {
+        console.log(error)
+        res.status(500).json({ error: 'An error occurred while fetching users.' });
+    }
+});
 
 module.exports = app;  
