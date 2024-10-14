@@ -63,7 +63,7 @@ const createAndEmitNotification = async (userId, title, message, source, extra =
     const io = getIo()
     const notification = await Notification({ userId, title, message, source, extra });
     await notification.save();
-    io.to(userId).emit('notification', { notification, extra });
+    io.to(userId).emit('notification', notification);
 };
 
 app.post('/otpgeneration', async (req, res) => {
@@ -267,9 +267,10 @@ app.post('/addMatchList', async (req, res) => {
 
         const matches = await Match.find({
             destination: destination,
-            startDate: { $lte: endDate },
-            endDate: { $gte: startDate },
-            budget: { $gte: budget - 1500, $lte: budget + 1500 }
+            $or: [
+                { startDate: { $lte: endDate }, endDate: { $gte: startDate } },
+                { startDate: startDate, endDate: endDate }  // Exact match case
+            ],
         }).populate('userId');
 
         res.status(200).json({
@@ -326,7 +327,7 @@ app.post('/getMatch', async (req, res) => {
             startDate: { $lte: end },
             endDate: { $gte: start },
             budget: { $gte: budget - 1500, $lte: budget + 1500 }
-        }).populate('userId', 'username picUrl email');
+        }).populate('userId', 'username picUrl email gender location bio trips');
 
         res.status(200).json({
             message: 'Matching travel plans found!',

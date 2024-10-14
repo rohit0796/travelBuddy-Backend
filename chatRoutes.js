@@ -30,7 +30,7 @@ app.post('/accessChat', async (req, res) => {
             { users: { $elemMatch: { $eq: userid } } },
         ],
     })
-        .populate("users", "-password")
+        .populate("users", "username email bio picUrl gender location socialMedia _id")
         .populate("latestMessage");
 
     isChat = await Schema.populate(isChat, {
@@ -59,31 +59,45 @@ app.get('/fetch-chats/:id', async (req, res) => {
     const { id } = req.params;
     try {
         let results = await Chat.find({ users: { $elemMatch: { $eq: id } } })
-            .populate("users", "-password")
-            .populate("groupAdmin", "-password")
+            .populate({
+                path: "users",
+                select: "username email bio picUrl gender location socialMedia _id", // Include only specific fields, excluding sensitive data
+            })
+            .populate({
+                path: "groupAdmin",
+                select: "username picUrl gender location socialMedia email bio  _id", // Include only necessary fields
+            })
             .populate("latestMessage")
             .sort({ updatedAt: -1 })
             .exec();
 
+        // Populate latestMessage sender details
         results = await Schema.populate(results, {
             path: "latestMessage.sender",
             select: "username picUrl",
         });
 
-        const updatedResults = await Promise.all(results.map(async (chat) => {
-            const unreadMessagesCount = await Message.countDocuments({
-                Chat: chat._id,
-                read: false,
-                sender: { $ne: id }
-            });
-            return { ...chat._doc, unreadCount: unreadMessagesCount };
-        }));
+        // Add unread messages count to each chat
+        const updatedResults = await Promise.all(
+            results.map(async (chat) => {
+                const unreadMessagesCount = await Message.countDocuments({
+                    Chat: chat._id,
+                    read: false,
+                    sender: { $ne: id }
+                });
+
+                return { ...chat._doc, unreadCount: unreadMessagesCount };
+            })
+        );
 
         res.status(200).send(updatedResults);
+
     } catch (error) {
-        res.status(400).send({ message: error.message });
+        console.error(error);
+        res.status(500).send({ message: "Failed to fetch chats" });
     }
 });
+
 
 app.post('/mark-as-read', async (req, res) => {
     const { chatId, userId } = req.body;

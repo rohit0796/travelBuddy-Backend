@@ -3,7 +3,7 @@ const app = express.Router();
 const User = require('./models/UserSchema');
 const Trip = require('./models/TripSchema');
 const Notifications = require('./models/Notifications');
-const Match = require('./models/MatchListSchema'); 
+const Match = require('./models/MatchListSchema');
 
 const { getIo } = require('./socket');
 const Expense = require('./models/exepnseSchema');
@@ -19,9 +19,9 @@ const sendNotification = (fcmtoken, title, body) => {
         }
     })
 }
-const createAndEmitNotification = async (userId, title, message, source) => {
+const createAndEmitNotification = async (userId, title, message, source, extra) => {
     const io = getIo()
-    const notification = await Notifications({ userId, title, message, source });
+    const notification = await Notifications({ userId, title, message, source, extra });
     await notification.save();
     io.to(userId.toString()).emit('notification', notification);
 };
@@ -46,14 +46,26 @@ app.post('/create-trip', async (req, res) => {
         for (const user of travellers) {
             await User.findByIdAndUpdate(user._id, { $push: { trips: trip._id } });
         }
-        const users = trip.travellers;
-        users.forEach(user => {
-            if (user._id !== currentUser._id) {
-                createAndEmitNotification(user._id, 'New Trip', `${trip.destination} has been created`, 'trip');
-                sendNotification(user?.fcmToken, 'New Trip', `${trip.destination} has been created`)
+        const userIds = trip.travellers.map(user => user._id);  // Extract the IDs from the users array
 
-            }
-        });
+        User.find({ _id: { $in: userIds } })
+            .then(users => {
+                users.forEach(user => {
+                    if (user._id !== currentUser._id) {
+                        // Create and emit an in-app notification
+                        createAndEmitNotification(user._id, 'New Trip', `${trip.destination} has been created`, 'trip', populatedTrip);
+                        // Send FCM notification
+                        if (user.fcmToken) {  // Ensure fcmToken exists before sending
+                            sendNotification(user.fcmToken, 'New Trip', `${trip.destination} has been created`);
+                        } else {
+                            console.log(`FCM token not available for user: ${user._id}`);
+                        }
+                    }
+                });
+            })
+            .catch(err => {
+                console.error('Error fetching users:', err);
+            });
         res.json({ status: 'ok', trip: populatedTrip });
     } catch (error) {
         console.log(error);
@@ -127,7 +139,7 @@ app.post('/add-expense', async (req, res) => {
         const users = members;
         users.forEach(user => {
             if (user.member != creator) {
-                createAndEmitNotification(user.member, 'New Expense', `A new expense - ${description} has been added to ${trip.destination}`, 'expense');
+                createAndEmitNotification(user.member, 'New Expense', `A new expense - ${description} has been added to ${trip.destination}`, 'expense', trip);
             }
         });
         res.json({ status: 'ok', data: expense })
@@ -196,7 +208,7 @@ app.post('/:tripId/add-poll', async (req, res) => {
 
         const users = trip.travellers;
         users.forEach(user => {
-            createAndEmitNotification(user.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll');
+            createAndEmitNotification(user.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll', trip);
         });
 
         res.json({ status: 'ok', data: poll })
@@ -449,9 +461,9 @@ app.post('/clear-dues', async (req, res) => {
         const user = await User.findById(userId)
         const user2 = await User.findById(selectedMemberId)
         res.json({ status: 'ok', message: 'Expenses marked as paid successfully' });
-        createAndEmitNotification(selectedMemberId, 'Payment Done', `${user.username} paid you ₹${BalanceAmount}`, 'expense')
+        createAndEmitNotification(selectedMemberId, 'Payment Done', `${user.username} paid you ₹${BalanceAmount}`, 'expense-pay')
         sendNotification(user2?.fcmToken, 'New Payment', `${user.username} paid you ₹${BalanceAmount}`)
-
+ 
     } catch (error) {
         console.error('Error marking expenses as paid:', error);
         res.status(500).json({ message: 'Server error' });
