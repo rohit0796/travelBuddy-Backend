@@ -237,12 +237,12 @@ app.post('/delete-expense', async (req, res) => {
         res.json({ status: 'error', error })
     }
 })
-// Add this route in your backend server file
 
 app.put('/update-polls', async (req, res) => {
     try {
         const { pollId, user, optionIndex } = req.body;
-        const updatedPoll = await polls.findById(pollId)
+        const updatedPoll = await polls.findById(pollId);
+
         const updatedOptions = updatedPoll.options.map((option, index) => {
             if (index === optionIndex) {
                 if (option.chosenBy.some((us) => us._id === user._id)) {
@@ -257,21 +257,26 @@ app.put('/update-polls', async (req, res) => {
                     };
                 }
             } else {
-                if (updatedPoll.multipleChoice) return { ...option };
-                return {
-                    ...option,
-                    chosenBy: option.chosenBy.filter((user) => user._id !== user._id),
-                };
+                if (!updatedPoll.multipleChoice) {
+                    return {
+                        ...option,
+                        chosenBy: option.chosenBy.filter((us) => us._id !== user._id),
+                    };
+                }
+                return { ...option };
             }
         });
-        updatedPoll.options = updatedOptions
-        updatedPoll.save()
+
+        updatedPoll.options = updatedOptions;
+        await updatedPoll.save();
+
         res.json({ status: 'ok', data: updatedPoll });
     } catch (error) {
         res.json({ status: 'error', data: error });
         console.log(error);
     }
 });
+
 
 app.delete('/delete-poll', async (req, res) => {
     const { tripId, pollId } = req.body;
@@ -318,7 +323,7 @@ app.put('/update-trip', async (req, res) => {
             if (!newTravellers.includes(oldTravellerId)) {
                 const user = await User.findById(oldTravellerId);
                 if (user) {
-                    createAndEmitNotification(user._id, 'Removed from trip', `You have been removed from ${trip.destination} by the admins`, 'trip');
+                    createAndEmitNotification(user._id, 'Removed from trip', `You have been removed from ${trip.destination} by the admins`, 'trip', trip);
                     user.trips = user.trips.filter(trip => trip.toString() !== tripId.toString());
                     await user.save();
                 }
@@ -339,7 +344,7 @@ app.put('/update-trip', async (req, res) => {
         for (const traveller of travellers) {
             const user = await User.findById(traveller._id);
             if (user && !user.trips.includes(tripId)) {
-                createAndEmitNotification(user._id, 'New Trip', `You have been added to ${trip.destination}`, 'trip');
+                createAndEmitNotification(user._id, 'New Trip', `You have been added to ${trip.destination}`, 'trip', trip);
                 user.trips.push(tripId);
                 await user.save();
             }
@@ -463,7 +468,7 @@ app.post('/clear-dues', async (req, res) => {
         res.json({ status: 'ok', message: 'Expenses marked as paid successfully' });
         createAndEmitNotification(selectedMemberId, 'Payment Done', `${user.username} paid you ₹${BalanceAmount}`, 'expense-pay')
         sendNotification(user2?.fcmToken, 'New Payment', `${user.username} paid you ₹${BalanceAmount}`)
- 
+
     } catch (error) {
         console.error('Error marking expenses as paid:', error);
         res.status(500).json({ message: 'Server error' });
