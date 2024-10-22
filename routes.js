@@ -255,10 +255,11 @@ app.post('/rightswipe/:userid', async (req, res) => {
 
 app.post('/addMatchList', async (req, res) => {
     try {
+        const io = getIo()
         const { userId, destination, startDate, endDate, budget } = req.body;
         const newTravelPlan = new Match({
             userId,
-            destination,
+            destination: destination.toLowerCase(),
             startDate,
             endDate,
             budget
@@ -266,13 +267,23 @@ app.post('/addMatchList', async (req, res) => {
         await newTravelPlan.save();
 
         const matches = await Match.find({
-            destination: destination,
+            destination: destination.toLowerCase(),
             $or: [
                 { startDate: { $lte: endDate }, endDate: { $gte: startDate } },
                 { startDate: startDate, endDate: endDate }  // Exact match case
             ],
-        }).populate('userId');
+        }).populate('userId', 'username email picUrl trips location bio gender socialMedia');
 
+        var newMatch;
+
+        matches.forEach((match) => {
+            if (match.userId._id == userId)
+                newMatch = match
+        })
+        matches.forEach((match) => {
+            if (match.userId._id != userId)
+                io.to(match.userId._id.toString()).emit('matched', newMatch)
+        })
         res.status(200).json({
             message: 'Matching travel plans found!',
             matches: matches
