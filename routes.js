@@ -331,14 +331,16 @@ app.put('/mark-read/:userId', async (req, res) => {
 app.post('/getMatch', async (req, res) => {
     try {
         const { destination, startDate, endDate, budget } = req.body;
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        // const start = new Date(startDate);
+        // const end = new Date(endDate);
+
         const matches = await Match.find({
-            destination: destination,
-            startDate: { $lte: end },
-            endDate: { $gte: start },
-            budget: { $gte: budget - 1500, $lte: budget + 1500 }
-        }).populate('userId', 'username picUrl email gender location bio trips');
+            destination: destination.toLowerCase(),
+            $or: [
+                { startDate: { $lte: endDate }, endDate: { $gte: startDate } },
+                { startDate: startDate, endDate: endDate }  // Exact match case
+            ],
+        }).populate('userId', 'username email picUrl trips location bio gender socialMedia');
 
         res.status(200).json({
             message: 'Matching travel plans found!',
