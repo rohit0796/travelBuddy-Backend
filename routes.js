@@ -237,6 +237,7 @@ app.post('/rightswipe/:userid', async (req, res) => {
     if (user.rightSwipes.find((id) => id == currentUserId)) {
         const user2 = await User.findByIdAndUpdate(currentUserId, { $push: { rightSwipes: userid } })
         createAndEmitNotification(userid, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`, 'match', { username: user2.username, picUrl: user2.picUrl, id: currentUserId })
+        createAndEmitNotification(user2._id, 'Match Found', `You have a new match with ${user.username} for your upcoming trip.`, 'match', { username: user.username, picUrl: user.picUrl, id: user._id })
         sendNotification(user.fcmToken, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`)
         res.json({ status: 'ok', msg: 'match found', data: user })
     }
