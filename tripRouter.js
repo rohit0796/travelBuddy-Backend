@@ -10,14 +10,30 @@ const Expense = require('./models/exepnseSchema');
 const polls = require('./models/pollSchema');
 const { firebase } = require('./Firebase/firebase');
 const user = require('./models/UserSchema');
-const sendNotification = (fcmtoken, title, body) => {
-    firebase.messaging().send({
-        token: fcmtoken,
-        notification: {
-            title: title,
-            body: body
+const sendNotification = async (fcmtoken, title, body) => {
+    try {
+        firebase.messaging().send({
+            token: fcmtoken,
+            notification: {
+                title: title,
+                body: body
+            }
+        })
+    }
+    catch (error) {
+        if (error.code === 'messaging/registration-token-not-registered') {
+            console.log(`Token ${token} is invalid, removing from database.`);
+
+            // Remove the token from the User document
+            await User.updateOne(
+                { fcmToken: token },
+                { $unset: { fcmToken: "" } }
+            );
+            console.log(`Token ${token} removed from the database.`);
+        } else {
+            console.error('Error sending message:', error);
         }
-    })
+    }
 }
 const createAndEmitNotification = async (userId, title, message, source, extra) => {
     const io = getIo()
@@ -62,7 +78,7 @@ app.post('/create-trip', async (req, res) => {
                         }
                     }
                 });
-            })
+            }) 
             .catch(err => {
                 console.error('Error fetching users:', err);
             });

@@ -11,14 +11,30 @@ const bcrypt = require('bcryptjs');
 const Notification = require('./models/Notifications');
 const { getIo } = require('./socket');
 const { firebase } = require('./Firebase/firebase');
-const sendNotification = (fcmtoken, title, body) => {
-    firebase.messaging().send({
-        token: fcmtoken,
-        notification: {
-            title: title,
-            body: body
+const sendNotification = async (fcmtoken, title, body) => {
+    try {
+        firebase.messaging().send({
+            token: fcmtoken,
+            notification: {
+                title: title,
+                body: body
+            }
+        })
+    }
+    catch (error) {
+        if (error.code === 'messaging/registration-token-not-registered') {
+            console.log(`Token ${token} is invalid, removing from database.`);
+
+            // Remove the token from the User document
+            await User.updateOne(
+                { fcmToken: token },
+                { $unset: { fcmToken: "" } }
+            );
+            console.log(`Token ${token} removed from the database.`);
+        } else {
+            console.error('Error sending message:', error);
         }
-    })
+    }
 }
 
 const generateOTP = () => {
