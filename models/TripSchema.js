@@ -43,6 +43,10 @@ const tripSchema = mongoose.Schema({
             ref: 'poll'
         }
     ],
+    createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+    }
 })
 
 const Trip = mongoose.model('Trip', tripSchema);

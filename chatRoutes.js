@@ -7,31 +7,34 @@ const Message = require('./models/messageSchema')
 const { getIo } = require('./socket')
 const { firebase } = require('./Firebase/firebase')
 const user = require('./models/UserSchema')
+const Notifications = require('./models/Notifications')
 const sendNotification = async (fcmtoken, title, body) => {
-    try {
-        firebase.messaging().send({
-            token: fcmtoken,
-            notification: {
-                title: title,
-                body: body
-            }
-        })
-    }
-    catch (error) {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    }).then().catch(async (error) => {
         if (error.code === 'messaging/registration-token-not-registered') {
-            console.log(`Token ${token} is invalid, removing from database.`);
-
+            console.log(`Token ${fcmtoken} is invalid, removing from database.`);
             // Remove the token from the User document
             await Schema.updateOne(
-                { fcmToken: token },
+                { fcmToken: fcmtoken },
                 { $unset: { fcmToken: "" } }
             );
-            console.log(`Token ${token} removed from the database.`);
+            console.log(`Token ${fcmtoken} removed from the database.`);
         } else {
             console.error('Error sending message:', error);
         }
-    }
+    })
 }
+const createAndEmitNotification = async (userId, title, message, source, extra) => {
+    const io = getIo()
+    const notification = await Notifications({ userId, title, message, source, extra });
+    await notification.save();
+    io.to(userId.toString()).emit('notification', notification);
+};
 app.post('/accessChat', async (req, res) => {
     const { userid, searchid } = req.body;
     if (!userid) {
@@ -66,8 +69,6 @@ app.post('/accessChat', async (req, res) => {
             _id: searchid
         };
         res.status(200).json(chatData);
-
-
     }
 })
 
@@ -188,7 +189,12 @@ app.post('/send-messages', async (req, res) => {
         await Chat.findByIdAndUpdate(createdChat ? createdChat._id : chatId, { latestMessage: message }, { new: true });
         res.json(message);
         receiver.forEach((rec) => {
-            sendNotification(rec, message.sender.username, content)
+            try {
+                sendNotification(rec, message.sender.username, content)
+
+            } catch (error) {
+                console.log(error)
+            }
         })
 
     } catch (error) {
@@ -231,6 +237,19 @@ app.post('/update-group', async (req, res) => {
     try {
         const obj = req.body;
 
+        // Fetch the current group data
+        const existingGroup = await Chat.findById(obj._id).populate("users", "-password");
+
+        if (!existingGroup) {
+            return res.status(404).json({ error: 'Group not found' });
+        }
+
+        // Determine removed users
+        const currentUsers = existingGroup.users.map(user => user._id.toString());
+        const updatedUsers = obj.users.map(user => user._id.toString());
+        const removedUsers = currentUsers.filter(userId => !updatedUsers.includes(userId));
+
+        // Update the group
         const updatedGroup = await Chat.findByIdAndUpdate(obj._id, obj, { new: true })
             .populate("users", "-password")
             .populate("groupAdmin", "-password");
@@ -239,11 +258,20 @@ app.post('/update-group', async (req, res) => {
             return res.status(404).json({ error: 'Group not found' });
         }
 
+        // Placeholder: Handle notifications for removed users
+        if (removedUsers.length > 0) {
+            removedUsers.forEach(user => {
+                createAndEmitNotification(user, `Removed from ${obj.chatName}`, `Admins removed you from the chat - ${obj.chatName}`)
+            })
+            console.log("Removed Users: ", removedUsers);
+            // You can send notifications here to the `removedUsers` via your notification service.
+        }
+
         res.json({ status: 'ok', updatedGroup });
-    }
-    catch (error) {
+    } catch (error) {
         res.status(400);
         throw new Error(error.message);
     }
-})
+});
+
 module.exports = app;

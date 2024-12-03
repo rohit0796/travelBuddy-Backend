@@ -11,30 +11,28 @@ const polls = require('./models/pollSchema');
 const { firebase } = require('./Firebase/firebase');
 const user = require('./models/UserSchema');
 const sendNotification = async (fcmtoken, title, body) => {
-    try {
-        firebase.messaging().send({
-            token: fcmtoken,
-            notification: {
-                title: title,
-                body: body
-            }
-        })
-    }
-    catch (error) {
+    firebase.messaging().send({
+        token: fcmtoken,
+        notification: {
+            title: title,
+            body: body
+        }
+    }).then(res => console.log(res)
+    ).catch(async (error) => {
         if (error.code === 'messaging/registration-token-not-registered') {
-            console.log(`Token ${token} is invalid, removing from database.`);
-
+            console.log(`Token ${fcmtoken} is invalid, removing from database.`);
             // Remove the token from the User document
-            await User.updateOne(
-                { fcmToken: token },
+            await Schema.updateOne(
+                { fcmToken: fcmtoken },
                 { $unset: { fcmToken: "" } }
             );
-            console.log(`Token ${token} removed from the database.`);
+            console.log(`Token ${fcmtoken} removed from the database.`);
         } else {
             console.error('Error sending message:', error);
         }
-    }
+    })
 }
+
 const createAndEmitNotification = async (userId, title, message, source, extra) => {
     const io = getIo()
     const notification = await Notifications({ userId, title, message, source, extra });
@@ -53,11 +51,12 @@ app.post('/create-trip', async (req, res) => {
             travellers,
             budget,
             itinerary,
-            admins
+            admins,
+            createdBy: currentUser._id
         });
         await trip.save();
 
-        const populatedTrip = await Trip.findById(trip._id).populate('travellers', 'picUrl username');
+        const populatedTrip = await Trip.findById(trip._id).populate('travellers', 'picUrl username').populate('createdBy', 'picUrl username');
 
         for (const user of travellers) {
             await User.findByIdAndUpdate(user._id, { $push: { trips: trip._id } });
@@ -78,7 +77,7 @@ app.post('/create-trip', async (req, res) => {
                         }
                     }
                 });
-            }) 
+            })
             .catch(err => {
                 console.error('Error fetching users:', err);
             });
@@ -109,7 +108,13 @@ app.get('/:tripId', async (req, res) => {
     try {
         const trip = await Trip.findById(tripId)
             .populate('travellers', 'picUrl username')
-            .populate('polls')
+            .populate('createdBy', 'picUrl username')
+            .populate({
+                path: 'polls',
+                populate: [
+                    { path: 'creator', select: 'picUrl username' },
+                ]
+            })
             .populate({
                 path: 'expenses',
                 populate: [
@@ -167,7 +172,7 @@ app.post('/add-expense', async (req, res) => {
 
 app.post('/:tripId/itinerary', async (req, res) => {
     const { tripId } = req.params;
-    const { date, activities, mode, activityIndex } = req.body;
+    const { date, activities, mode, activityIndex, creator } = req.body;
 
     try {
         const trip = await Trip.findById(tripId);
@@ -221,13 +226,13 @@ app.post('/:tripId/add-poll', async (req, res) => {
         }
         trip.polls.push(poll._id)
         await trip.save()
-
+        const newPoll = await polls.findById(poll._id).populate('creator')
         const users = trip.travellers;
         users.forEach(user => {
             createAndEmitNotification(user.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll', trip);
         });
 
-        res.json({ status: 'ok', data: poll })
+        res.json({ status: 'ok', data: newPoll })
     } catch (error) {
         res.json({ status: 'error', data: error })
     }
@@ -257,7 +262,7 @@ app.post('/delete-expense', async (req, res) => {
 app.put('/update-polls', async (req, res) => {
     try {
         const { pollId, user, optionIndex } = req.body;
-        const updatedPoll = await polls.findById(pollId);
+        const updatedPoll = await polls.findById(pollId).populate('creator');
 
         const updatedOptions = updatedPoll.options.map((option, index) => {
             if (index === optionIndex) {
@@ -322,6 +327,7 @@ app.put('/update-trip', async (req, res) => {
     const newTravellers = travellers.map(user => user._id);
     try {
         const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
+            .populate('createdBy', 'username')
             .populate('polls')
             .populate({
                 path: 'expenses',
