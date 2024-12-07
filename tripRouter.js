@@ -11,6 +11,7 @@ const polls = require('./models/pollSchema');
 const { firebase } = require('./Firebase/firebase');
 const user = require('./models/UserSchema');
 const sendNotification = async (fcmtoken, title, body) => {
+    if (!fcmtoken) return;
     firebase.messaging().send({
         token: fcmtoken,
         notification: {

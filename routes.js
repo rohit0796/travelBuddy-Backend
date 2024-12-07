@@ -12,6 +12,7 @@ const Notification = require('./models/Notifications');
 const { getIo } = require('./socket');
 const { firebase } = require('./Firebase/firebase');
 const sendNotification = async (fcmtoken, title, body) => {
+    if (!fcmtoken) return;
     firebase.messaging().send({
         token: fcmtoken,
         notification: {
