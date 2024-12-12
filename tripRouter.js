@@ -92,10 +92,6 @@ app.get('/get-trips/:id', async (req, res) => {
     try {
         const { id } = req.params;
         const trips = await Trip.find({ travellers: { $elemMatch: { $eq: id } } }).populate('travellers', 'picUrl username')
-            .populate({
-                path: 'expenses.creator',
-                select: 'picUrl username'
-            });
         res.json({ trips: trips })
     } catch (error) {
         console.log(error)
@@ -227,7 +223,7 @@ app.post('/:tripId/add-poll', async (req, res) => {
         }
         trip.polls.push(poll._id)
         await trip.save()
-        const newPoll = await polls.findById(poll._id).populate('creator')
+        const newPoll = await polls.findById(poll._id).populate('creator', "username picUrl")
         const users = trip.travellers;
         users.forEach(user => {
             createAndEmitNotification(user.toString(), 'New Poll', `A new poll has been added to ${trip.destination}`, 'poll', trip);
@@ -263,7 +259,7 @@ app.post('/delete-expense', async (req, res) => {
 app.put('/update-polls', async (req, res) => {
     try {
         const { pollId, user, optionIndex } = req.body;
-        const updatedPoll = await polls.findById(pollId).populate('creator');
+        const updatedPoll = await polls.findById(pollId).populate('creator',"username picUrl");
 
         const updatedOptions = updatedPoll.options.map((option, index) => {
             if (index === optionIndex) {

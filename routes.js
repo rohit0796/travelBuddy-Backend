@@ -251,7 +251,18 @@ app.post('/rightswipe/:userid', async (req, res) => {
         createAndEmitNotification(userid, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`, 'match', { username: user2.username, picUrl: user2.picUrl, id: currentUserId })
         createAndEmitNotification(user2._id, 'Match Found', `You have a new match with ${user.username} for your upcoming trip.`, 'match', { username: user.username, picUrl: user.picUrl, id: user._id })
         sendNotification(user.fcmToken, 'Match Found', `You have a new match with ${user2.username} for your upcoming trip.`)
-        res.json({ status: 'ok', msg: 'match found', data: user })
+        res.json({
+            status: 'ok', msg: 'match found', data: {
+                _id: user._id,
+                username: user.username,
+                picUrl: user.picUrl,
+                email: user.email,
+                gender: user.gender,
+                bio: user.bio,
+                location: user.location,
+                socialMedia: user.socialMedia
+            },
+        })
     }
     else {
         try {

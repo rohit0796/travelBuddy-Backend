@@ -79,7 +79,7 @@ app.get('/fetch-chats/:id', async (req, res) => {
         let results = await Chat.find({ users: { $elemMatch: { $eq: id } } })
             .populate({
                 path: "users",
-                select: "username email bio picUrl gender location socialMedia _id", // Include only specific fields, excluding sensitive data
+                select: "username email bio picUrl gender location socialMedia _id", 
             })
             .populate({
                 path: "groupAdmin",
@@ -134,13 +134,17 @@ app.post('/mark-as-read', async (req, res) => {
 
 app.get('/get-messages/:id', async (req, res) => {
     try {
+        const { page = 1, limit = 100 } = req.query; 
         const messages = await Message.find({ Chat: req.params.id })
+            .sort({ createdAt: -1 }) 
+            .skip((page - 1) * limit) 
+            .limit(parseInt(limit)) 
             .populate("sender", "username picUrl")
             .populate("Chat");
+
         res.json(messages);
     } catch (error) {
-        res.status(400);
-        throw new Error(error.message);
+        res.status(400).json({ message: error.message });
     }
 });
 

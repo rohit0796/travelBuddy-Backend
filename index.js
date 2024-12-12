@@ -57,12 +57,10 @@ io.on('connection', (socket) => {
     });
 
     socket.on("start typing", (room) => {
-        console.log('start typing', room);
         socket.in(room.id).emit("typing", room);
     });
 
     socket.on("stop typing", (room) => {
-        console.log('stop typing', room);
         socket.to(room).emit("not typing", room);
     });
 
