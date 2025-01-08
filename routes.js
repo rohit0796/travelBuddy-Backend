@@ -38,33 +38,37 @@ const generateOTP = () => {
 };
 
 // Function to send OTP
-const sendOTP = async (email, otp) => {
+const sendOTP = async (email, otp, res) => {
     // Configure Nodemailer for sending emails
-    let transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: 'service.travel.buddy@gmail.com',
-            pass: 'koph hwzg wutn mdtq'
-        }
-    });
+    try {
+        let transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: 'service.travel.buddy@gmail.com',
+                pass: 'koph hwzg wutn mdtq'
+            }
+        });
 
-    // Email message
-    let mailOptions = {
-        from: 'service.travel.buddy@gmail.com',
-        to: email,
-        subject: 'TravelBuddy - Your OTP Code',
-        html: `
-        <p>Dear User,</p>
-        <p>Welcome to <strong>TravelBuddy</strong>! We're excited to have you onboard.</p>
-        <p>To complete your registration, please use the following One-Time Password (OTP) to verify your email:</p>
-        <p><strong style="font-size: 20px;">${otp}</strong></p>
-        <p>This OTP is valid for 10 minutes.</p>
-        <p>If you didn't request this, feel free to ignore this email.</p>
-        <p>Thank you,<br />The TravelBuddy Team</p>
-    `
-    };
-
-    await transporter.sendMail(mailOptions);
+        // Email message
+        let mailOptions = {
+            from: 'service.travel.buddy@gmail.com',
+            to: email,
+            subject: 'TravelBuddy - Your OTP Code',
+            html: `
+            <p>Dear User,</p>
+            <p>Welcome to <strong>TravelBuddy</strong>! We're excited to have you onboard.</p>
+            <p>To complete your registration, please use the following One-Time Password (OTP) to verify your email:</p>
+            <p><strong style="font-size: 20px;">${otp}</strong></p>
+            <p>This OTP is valid for 10 minutes.</p>
+            <p>If you didn't request this, feel free to ignore this email.</p>
+            <p>Thank you,<br />The TravelBuddy Team</p>
+        `
+        };
+        await transporter.sendMail(mailOptions);
+    } catch (error) {
+        console.log(error.message)
+        return error.message;
+    }
 };
 
 
@@ -81,10 +85,9 @@ const createAndEmitNotification = async (userId, title, message, source, extra =
 app.post('/otpgeneration', async (req, res) => {
     const { email, forget } = req.body;
     var user;
-    if (forget) {
-        user = await User.findOne({ email: email })
-    }
+    user = await User.findOne({ email: email })
     if (forget && !user) return res.json({ message: 'Email not Registered !!' });
+    if (!forget && user) return res.json({ status: 'error', message: 'Email already Registered !!' });
     const otp = generateOTP();
     const token = jwt.sign(
         { otp, exp: Math.floor(Date.now() / 1000) + (10 * 60) }, // expires in 10 mins
@@ -92,8 +95,11 @@ app.post('/otpgeneration', async (req, res) => {
     );
 
     // Send OTP to the user
-    await sendOTP(email, otp);
-
+    const message = await sendOTP(email, otp, res);
+    if (message) {
+        res.json({ status: 'error', message: message });
+        return;
+    }
     res.status(201).json({ status: 'ok', token, message: 'OTP sent to your email!' });
 
 })
