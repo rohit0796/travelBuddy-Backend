@@ -64,7 +64,11 @@ const sendOTP = async (email, otp, res) => {
             <p>Thank you,<br />The TravelBuddy Team</p>
         `
         };
-        await transporter.sendMail(mailOptions);
+        try {
+            await transporter.sendMail(mailOptions);
+        } catch (error) {
+            console.log(error)
+        }
     } catch (error) {
         console.log(error.message)
         return error.message;

@@ -4,12 +4,15 @@ const User = require('./models/UserSchema');
 const Trip = require('./models/TripSchema');
 const Notifications = require('./models/Notifications');
 const Match = require('./models/MatchListSchema');
-
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { getIo } = require('./socket');
 const Expense = require('./models/exepnseSchema');
 const polls = require('./models/pollSchema');
 const { firebase } = require('./Firebase/firebase');
 const user = require('./models/UserSchema');
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 const sendNotification = async (fcmtoken, title, body) => {
     if (!fcmtoken) return;
     firebase.messaging().send({
@@ -212,6 +215,52 @@ app.post('/:tripId/itinerary', async (req, res) => {
     }
 });
 
+app.post('/generate-itinerary', async (req, res) => {
+    console.log("API CALLED")
+    const { destination, startDate, endDate } = req.body;
+
+    const prompt = `
+    Generate a travel itinerary in JSON format for the trip to ${destination} from ${startDate} to one day less than ${endDate}.
+    Each item should be an object with a "date" in ISO format (ending in T18:30:00.000Z), and an "activities" array.
+    Each activity should have "activity" (string) and "time" (e.g., "10:00 AM").
+    
+    Example format:
+    [
+      {
+        "date": "2024-12-11T18:30:00.000Z",
+        "activities": [
+          { "activity": "Visit Eiffel Tower", "time": "10:00 AM" }
+        ]
+      },
+      {
+        "date": "2024-12-12T18:30:00.000Z",
+        "activities": []
+      }
+    ]
+    
+    Generate accordingly for the requested trip.
+    `;
+
+    try {
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+        const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+                responseMimeType: 'application/json',
+            },
+        });
+
+        const response = await result.response;
+        const itinerary = JSON.parse(response.text());
+
+        res.json({ itinerary });
+    } catch (error) {
+        console.error('Error generating itinerary:', error);
+        res.status(500).json({ error: 'Failed to generate itinerary' });
+    }
+});
+
+
 app.post('/:tripId/add-poll', async (req, res) => {
     const { tripId } = req.params
     try {
@@ -259,7 +308,7 @@ app.post('/delete-expense', async (req, res) => {
 app.put('/update-polls', async (req, res) => {
     try {
         const { pollId, user, optionIndex } = req.body;
-        const updatedPoll = await polls.findById(pollId).populate('creator',"username picUrl");
+        const updatedPoll = await polls.findById(pollId).populate('creator', "username picUrl");
 
         const updatedOptions = updatedPoll.options.map((option, index) => {
             if (index === optionIndex) {
@@ -321,12 +370,13 @@ app.delete('/delete-poll', async (req, res) => {
 
 app.put('/update-trip', async (req, res) => {
     const { tripId, destination, startDate, endDate, budget, travellers, admins, itinerary } = req.body;
+    console.log(itinerary)
     const newTravellers = travellers.map(user => user._id);
     try {
         const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
             .populate('createdBy', 'username')
-            .populate('polls')
-            .populate({
+            .populate('polls')   
+            .populate({ 
                 path: 'expenses',
                 populate: [
                     { path: 'creator', select: 'picUrl username' },
@@ -357,7 +407,6 @@ app.put('/update-trip', async (req, res) => {
         trip.admins = admins || trip.admins;
         trip.itinerary = itinerary?.length === 0 ? trip.itinerary : itinerary;
         // console.log(travellers)
-        console.log(trip)
         const updatedTrip = await trip.save();
 
         for (const traveller of travellers) {
