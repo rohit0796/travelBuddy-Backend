@@ -23,7 +23,7 @@ const sendNotification = async (fcmtoken, title, body) => {
         if (error.code === 'messaging/registration-token-not-registered') {
             console.log(`Token ${fcmtoken} is invalid, removing from database.`);
             // Remove the token from the User document
-            await Schema.updateOne(
+            await User.updateOne(
                 { fcmToken: fcmtoken },
                 { $unset: { fcmToken: "" } }
             );
