@@ -26,7 +26,7 @@ const sendNotification = async (fcmtoken, title, body) => {
         if (error.code === 'messaging/registration-token-not-registered') {
             console.log(`Token ${fcmtoken} is invalid, removing from database.`);
             // Remove the token from the User document
-            await Schema.updateOne(
+            await user.updateOne(
                 { fcmToken: fcmtoken },
                 { $unset: { fcmToken: "" } }
             );
@@ -375,8 +375,8 @@ app.put('/update-trip', async (req, res) => {
     try {
         const trip = await Trip.findById(tripId).populate('travellers', 'picUrl username')
             .populate('createdBy', 'username')
-            .populate('polls')   
-            .populate({ 
+            .populate('polls')
+            .populate({
                 path: 'expenses',
                 populate: [
                     { path: 'creator', select: 'picUrl username' },
